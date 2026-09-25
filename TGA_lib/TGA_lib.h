@@ -15,9 +15,9 @@ TGAImage* TGA_CreateImage(int width, int height, int bit_pp);
 void TGA_DestroyImage(TGAImage* img);
 //###################################################
 
-//##### Read/Write TGA image data from /in file #####
+//##### Read/Write TGA image data from/in file #####
 int TGA_ReadFile(TGAImage* img, const char* filename);
-int TGA_WriteFile(const TGAImage* img, const char* filename, int vflip_flag, int rel_flag);
+int TGA_WriteFile(const TGAImage* img, const char* filename, int vflip_flag, int rle_flag);
 //###################################################
 
 //##### Getters & Setters #####
