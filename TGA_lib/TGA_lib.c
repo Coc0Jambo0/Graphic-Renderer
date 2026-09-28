@@ -52,10 +52,6 @@ struct TGA_image_s
 //##### Creation & Distruction of TGA image ADT #####
 TGAImage* TGA_CreateImage(int width, int height, int bits_per_pixel)
 {
-    //Check for parameter validity
-    if(width <= 0 || height <= 0){ fprintf(stderr, "[TGA_CreateImage]: invalid canvas dimensions (%dx%d), required strictly positive parameters.\n", width, height); return NULL; }
-    if(bits_per_pixel != 8 && bits_per_pixel != 16 && bits_per_pixel != 24 && bits_per_pixel != 32){ fprintf(stderr, "[TGA_CreateImage]: invalid pixel depth (%d bpp): expected 8, 16, 24, or 32\n", bits_per_pixel); return NULL; }
-
     //Check for memory availability
     TGAImage* img = (TGAImage*)malloc(sizeof(TGAImage));
     if(!img){ fprintf(stderr, "[TGA_CreateImage]: unable to service a memory request, failed to allocate TGAImage type.\n"); return NULL; }
@@ -185,10 +181,220 @@ static int unpack_RLE_data(TGAImage* img, FILE* file_in)
                 current_byte += Bytes_per_pixel;
             }
 
-            current_pixel +- num_pixel;
+            current_pixel += num_pixel;
         }
     }
     return 1;
 }
 //################################################################
 
+//##### Flip functions for image(vertically & horizontally) #####
+static int flip_vertically(TGAImage* img)
+{
+    const size_t width = img->width;
+    const size_t height = img->height;
+    const size_t Bytes_pp = img->Bytes_per_pixel;
+
+    if(!img || !img->data || width == 0 || height == 0){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    if(Bytes_pp != 1 || Bytes_pp != 2 || Bytes_pp != 3 || Bytes_pp != 4){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    
+    //x-coordinates
+    for(size_t c = 0; c < width; c++)
+    {
+        //y-coordinates
+        for(size_t r = 0; r < height / 2; r++)
+        {
+            //Bth color channel
+            for(int B = 0; B < Bytes_pp; B++)
+            {
+                //foreach row r:
+                //traverse r * width pixels and move of c columns, convert the position in bytes and access the Bth channel
+                size_t pixel_channel = (((r * width) + c) * Bytes_pp) + B;
+                //repeat the exact same calculation but starting from the bottom(height - 1) and rising up of r rows(height - 1 - r)
+                size_t mirrored_pixel_channel = ((((height - 1 - r) * width) + c) * Bytes_pp) + B;
+                
+                //swap position
+                uint8_t temp = img->data[pixel_channel];
+                img->data[pixel_channel] = img->data[mirrored_pixel_channel];
+                img->data[mirrored_pixel_channel] = temp;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int flip_horizontally(TGAImage* img)
+{
+    const size_t width = img->width;
+    const size_t height = img->height;
+    const size_t Bytes_pp = img->Bytes_per_pixel;
+
+    if(!img || !img->data || width == 0 || height == 0){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    if(Bytes_pp != 1 || Bytes_pp != 2 || Bytes_pp != 3 || Bytes_pp != 4){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    
+    //x-coordinates
+    for(size_t c = 0; c < width / 2; c++)
+    {
+        //y-coordinates
+        for(size_t r = 0; r < height; r++)
+        {
+            //Bth color channel
+            for(int B = 0; B < Bytes_pp; B++)
+            {
+                //foreach row r:
+                //traverse r * width pixels and move of c columns, convert the position in bytes and access the Bth channel
+                size_t pixel_channel = (((r * width) + c) * Bytes_pp) + B;
+                //repeat the exact same calculation but starting from the right(width - 1) and proceeding to the left of c columns(width - 1 - c)
+                size_t mirrored_pixel_channel = (((r * width) + (width - 1 - c)) * (Bytes_pp)) + B;
+                
+                //swap position
+                uint8_t temp = img->data[pixel_channel];
+                img->data[pixel_channel] = img->data[mirrored_pixel_channel];
+                img->data[mirrored_pixel_channel] = temp;
+            }
+        }
+    }
+
+    return 1;
+}
+//###############################################################
+
+//##### Read/Write TGA image data from/in file #####
+TGAImage* TGA_ReadFile(const char* filename)
+{
+    //Check if filename is proper and exists
+    if(!filename){fprintf(stderr, "[TGA_ReadFile]: Invalid filename parameter (NULL pointer).\n"); return NULL; }
+
+    FILE* file_in = fopen(filename, "rb");
+    if(!file_in){ fprintf(stderr, "[TGA_ReadFile]: Cannot open file '%s': %s\n", filename, strerror(errno)); return NULL; }
+
+    //Read the 18 Byte file header
+    TGAHeader header;
+    if(fread(&header, sizeof(TGAHeader), 1, file_in) != 1){ fprintf(stderr, "[TGA_ReadFile]: File '%s' truncated: failed to read complete 18-byte header.\n", filename); fclose(file_in); return NULL; }
+
+    //##### HEADER INSPECTION #####
+    //Byte 0: handled in the data payload(file cursor skipping over it)
+
+    //Byte 1: color_map_type(0 if no palette is present, 1 otherwise)
+    //Although color-mapped images are unsupported, RGB/RGBA TGAs might include a color palette:
+    //the tool reads the color map metadata solely to calculate how many bytes to skip before the pixel payload.
+    if (header.color_map_type != 0 && header.color_map_type != 1) { fprintf(stderr, "[TGA_ReadFile]: Byte no. 1 error (invalid color map specification %u).\n", header.color_map_type); fclose(file_in); return NULL; }
+    
+    //Byte 2: img_type
+    //2: Uncompressed RGB/RGBA
+    //3: Uncompressed Grayscale
+    //10: RLE RGB/RGBA
+    //11: RLE Grayscale
+    if (header.img_type != 2 && header.img_type != 3 && header.img_type != 10 && header.img_type != 11) 
+    { fprintf(stderr, "[TGA_ReadFile]: Byte no. 2 error (unsupported image type %u).\n", header.img_type); fclose(file_in); return NULL; }
+    
+    //Bytes 3 & 4: color_map_origin(ignored)
+
+    //Bytes 5 & 6: color_map_length
+    if(header.color_map_type == 0 && header.color_map_length != 0) fprintf(stderr, "[TGA_ReadFile]: Bytes 5 & 6 warning(defined length %u for non-existing color map.)\n", header.color_map_length);
+
+    //Byte 7: color_map_depth(number of bits used to represent color map entries)
+    //Header guard: palette entry size cannot be 0 bits if a color map is present
+    if(header.color_map_type == 0 && header.color_map_length != 0){ fprintf(stderr, "[TGA_ReadFile]: Byte 7 error (entries depth of 0 bits for defined color map.)\n"); fclose(file_in); return NULL; }
+
+    //Bytes 8 & 9: x_origin
+
+    //Bytes 10 && 11: y_origin
+
+    //Bytes 12 & 13: img_width
+    if(header.img_width == 0){ fprintf(stderr, "[TGA_ReadFile]: Bytes 12 & 13 error (invalid image width).\n"); fclose(file_in); return NULL; }
+    
+    //Bytes 14 & 15: img_height
+    if(header.img_heigt == 0){ fprintf(stderr, "[TGA_ReadFile]: Bytes 14 & 15 error (invalid image height).\n"); fclose(file_in); return NULL; }
+    
+    //Byte 16: bits_per_pixel
+    if(header.bits_per_pixel != 8 && header.bits_per_pixel != 16 && header.bits_per_pixel != 24 && header.bits_per_pixel != 32)
+    { fprintf(stderr, "[TGA_ReadFile]: Byte 16 error (unsupported pixel depth %u bpp).\n", header.bits_per_pixel); fclose(file_in); return NULL; }
+    
+    //Note: Grayscale image accepts only 8 bpp
+    if((header.img_type == 3 || header.img_type == 11) && header.bits_per_pixel != 8)
+    { fprintf(stderr, "[TGA_ReadFile]: Byte 16 error (grayscale image type does not support %u bpp).\n", header.bits_per_pixel); fclose(file_in); return NULL; }
+
+    //Byte 17: 
+    //Extract last 2 bits of Byte 17(representing how scanlines were displayed on old CRT TVs ==> value could be either 0, 1, 2 or 3)
+    //In the modern era, CRT display modes are no longer relevant
+    uint8_t scanline_display_mode = (header.img_descriptor >> 6) & 0x03;
+    if(scanline_display_mode != 0){ fprintf(stderr, "[TGA_ReadFile]: Byte 17 error (Interleaved format is unsupported).\n", scanline_display_mode); fclose(file_in); return NULL; }
+    //extract top_to_bottom flag value(aka 5th bit)
+    int is_top_to_bottom = (header.img_descriptor & (1 << 5)) != 0;
+    //extract left_to_right flag value(aka 4th bit)
+    int is_right_to_left = (header.img_descriptor & (1 << 4)) != 0;
+    //#############################
+
+    //##### POST-HEADER(ID & Color map data)#####
+    //Skip ID info
+    if(header.ID_lenght > 0)
+    {
+        if(fseek(file_in, header.ID_lenght, SEEK_CUR) != 0)
+        { 
+            fprintf(stderr, "[TGA_ReadFile]: Failed skipping %zu bytes Image ID field.\n", header.ID_lenght); 
+            fclose(file_in); return NULL;
+        }
+    }
+
+    //Even if this library manages only RGB/RGBA and Grayscale images, some image exporters still include a color map(needs to be skipped), here is why:
+    //*Some softwares produce a thumbnail/icon preview of the image, utilizing a small color map(saved inside the TGA file) to render it
+    //*Some image editors convert a indexed-color mapped image to a RGB/RGBA color image, without clearing the color map data
+
+    if(header.color_map_type != 0 && header.color_map_length > 0)
+    {
+        //This formula, calculates the number of Bytes that represent the color map:
+        //normally length * depth / 8 is enough, but some TGA color map use 15 bits color entries.
+        //( Suppose that there is only 1 entry which depth is 15b, 
+        //  it needs to occupy 2 Bytes in memory(15b + 1b padding) but the calculation  1 * 15 / 8 = 1(meaning the TGA file is misaligned of 1 Byte).
+        //  To resolve the issue, instead of using functions like .ceil(), 
+        //  the calculation ⌈A/B⌉ = (A + (B - 1))/B can be used, which in our case is ((length * depth) + 7)/8 )
+        
+        size_t map_bytes = ((size_t)header.color_map_length * header.color_map_depth + 7) / 8;
+        if(fseek(file_in, (long)map_bytes, SEEK_CUR) != 0){ fprintf(stderr, "[TGA_ReadFile]: Failed skipping color map of %zu Bytes.\n", map_bytes); fclose(file_in); return NULL; }
+    }
+    //###########################################
+
+    //##### Image PAYLOAD #####
+    //Allocate TGA pointer(ADT)
+    TGAImage* img = TGA_CreateImage(header.img_width, header.img_heigt, header.bits_per_pixel);
+    if(!img){ fclose(file_in); return 0; }
+    
+    //Uncompressed RGB/RGBA or Grayscale image type
+    if(header.img_type == 2 || header.img_type == 3)
+    {
+        //direct sequential read
+        size_t data_bytes = (size_t)(img->width) * (img->height) * (img->Bytes_per_pixel);
+        if(fread(img->data, 1, data_bytes, file_in) != data_bytes){ fprintf(stderr, "[TGA_ReadFile]: Unexpected EOF reading %zu raw pixel bytes.\n", data_bytes); TGA_DestroyImage(img); fclose(file_in); return NULL; }
+    }
+    //RLE encoded RGB/RGBA or Grayscale image type
+    else if(header.img_type == 10 || header.img_type == 11)
+    {
+        if(!unpack_RLE_data(img, file_in))
+        { 
+            TGA_DestroyImage(img);
+            return NULL; 
+        }
+    }
+    //#########################
+
+    fclose(file_in);
+
+    //if image was generated from bottom to top, flip it vertically
+    if(!is_top_to_bottom)
+    {
+        if(!flip_vertically(img))
+        { TGA_DestroyImage(img); return NULL; }
+    }
+    //if image was generated from right to left, flip it horizontally
+    if(is_right_to_left)
+    {
+        if(!flip_horizontally(img))
+        { TGA_DestroyImage(img); return NULL; }
+    }
+
+    return img;
+}
+int TGA_WriteFile(const char* filename, int vflip_flag, int hflip_flag, int rle_flag);
+//###################################################
