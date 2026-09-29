@@ -396,5 +396,99 @@ TGAImage* TGA_ReadFile(const char* filename)
 
     return img;
 }
-int TGA_WriteFile(const char* filename, int vflip_flag, int hflip_flag, int rle_flag);
+int TGA_WriteFile(TGAImage* img, const char* filename, int vflip_flag, int rle_flag)
+{
+    if(!filename){fprintf(stderr, "[TGA_ReadFile]: Invalid filename parameter (NULL pointer).\n"); return 0; }
+    
+    if(!img || !img->data){ fprintf(stderr, "[TGA_WriteFile]: Invalid image data.\n"); return 0; }
+    if(img->width == 0){ fprintf(stderr, "[TGA_WriteFile]: Invalid image width.\n"); return 0; }
+    if(img->height == 0){ fprintf(stderr, "[TGA_WriteFile]: Invalid image height.\n"); return 0; }
+
+    FILE* file_out = fopen(filename, "wb");
+    if(!file_out){ fprintf(stderr, "[TGA_WriteFile]: Failed opening destination(%s): %s", filename, strerror(errno)); return 0; }
+
+    //##### HEADER #####
+    //Initialize 18-Byte TGA Header
+    TGAHeader header; memset(&header, 0, sizeof(TGAHeader));
+
+    //All data related to the color map is set to 0(as the encoder/decoder does not deal with color mapped images)
+
+    //Byte 0: ID_Lenght
+    header.ID_lenght = 0;
+
+    //Byte 1: color_map_type
+    header.color_map_type = 0;
+
+    //Byte 2: img_type
+    //Grayscale(8 bpp) or RGB(24 bpp)/RGBA(32 bpp)
+    
+    //*img_type = 11(Grayscale with applied RLE)
+    //*img_type = 3(Grayscale with raw pixels)
+    if(img->Bytes_per_pixel == 1) header.img_type = rle_flag ? 11 : 3;
+    //*img type = 10(RGB/RGBA with applied RLE)
+    //*img tyoe = 2(RGB/RGBA with raw pixels)
+    else if(img->Bytes_per_pixel == 3 || img->Bytes_per_pixel == 4) header.img_type = rle_flag ? 10 : 2;
+    else{ fprintf(stderr, "[TGA_WriteFile]: Invalid pixel depth value(%u).\n"); fclose(file_out); return 0; }
+
+    //Bytes 3 & 4: color_map_origin
+    header.color_map_origin = 0;
+
+    //Bytes 5 & 6: color_map_length
+    header.color_map_length = 0;
+
+    //Byte 7: color_map_depth
+    header.color_map_depth = 0;
+
+    //Bytes 8 & 9: x_origin
+    header.x_origin = 0;
+
+    //Bytes 10 & 11: y_origin
+    header.y_origin = 0;
+
+    //Bytes 12 & 13: img_width
+    header.img_width = img->width;
+
+    //Bytes 14 & 15: img_height
+    header.img_heigt = img->height;
+
+    //Byte 16: bits_per_pixel
+    header.bits_per_pixel = (uint8_t)(img->Bytes_per_pixel * 8);
+
+    //Byte 17: img_descriptor
+    //* bits 0-3: alpha channel depth
+    uint8_t alpha_depth = (img->Bytes_per_pixel == 4) ? 8 : 0; //only if RGBA encoding is utilized
+    
+    //* bit 4: left to right display flag(0 = left_to_right)
+    //* bit 5: top to bottom display flag(1 = top_to_bottom) ==> 0x20
+    //* bits 6 & 7: CRT TVs scanlines display modes(set to 00)
+
+    //the generated image has a byte 17 = 
+    //* 00| 1 | 0 | 1000 if RGBA is utilized
+    //* 00| 1 | 0 | 0000 if other color representations are utilized
+    header.img_descriptor = (uint8_t)(0x20 | (alpha_depth & 0x0F));
+
+    //Attempt to write TGA header in the file
+    if(fwrite(&header, sizeof(TGAHeader),1 , file_out) != 1){ fprintf(stderr, "[TGA_WriteFile]: Failed to write complete 18-byte header.\n"); fclose(file_out); return 0; }
+    //##################
+
+    //##### Image PAYLOAD #####
+    //Uncompressed RGB/RGBA or Grayscale image type
+    if(!rle_flag)
+    {
+        size_t data_bytes = (size_t)(img->width) * (img->height) * (img->Bytes_per_pixel);
+        if(fwrite(img->data, 1, data_bytes, file_out) != data_bytes){ fprintf(stderr, "[TGA_ReadFile]: Unexpected error while writing %zu raw pixel bytes.\n", data_bytes); fclose(file_out); return 0; }
+    }
+    //RLE encoded RGB/RGBA or Grayscale image type
+    else
+    {
+        if(pack_RLE_data(img, file_out))
+        {
+            TGA_DestroyImage(img);
+            return 0;
+        }
+    }
+    //#########################
+    fclose(file_out);
+    return 1;
+}
 //###################################################
