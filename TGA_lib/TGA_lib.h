@@ -6,7 +6,8 @@
 typedef struct TGA_image_s TGAImage;
 typedef struct TGA_color_s
 {
-    uint8_t blue, green, red, alpha;
+    //TGA color order is B([0])G([1])R([2])A([3])
+    uint8_t BGR_A [4];
     uint8_t Bytes_pp;
 } TGAColor;
 

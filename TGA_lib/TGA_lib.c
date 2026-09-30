@@ -333,7 +333,7 @@ TGAImage* TGA_ReadFile(const char* filename)
     {
         if(fseek(file_in, header.ID_lenght, SEEK_CUR) != 0)
         { 
-            fprintf(stderr, "[TGA_ReadFile]: Failed skipping %zu bytes Image ID field.\n", header.ID_lenght); 
+            fprintf(stderr, "[TGA_ReadFile]: Failed skipping %u bytes Image ID field.\n", header.ID_lenght); 
             fclose(file_in); return NULL;
         }
     }
@@ -492,3 +492,36 @@ int TGA_WriteFile(TGAImage* img, const char* filename, int vflip_flag, int rle_f
     return 1;
 }
 //###################################################
+
+//##### Getters & Setters #####
+int TGA_GetWidth(const TGAImage* img){ return img->width; }
+int TGA_GetHeight(const TGAImage* img){ return img->height; }
+
+TGAColor TGA_GetPixel(const TGAImage* img, int x, int y)
+{
+    //Instatiate a "void" color
+    TGAColor color = {0};
+
+    //Check image boundaries
+    if(!img || !img->data || x < 0 || y < 0 || x >= img->width || y >= img->height){ fprintf(stderr, "[TGA_GetPixel]: Boundary error, pixel position (%d, %d) out of range!.\n", x, y); return color; }
+
+    color.Bytes_pp = img->Bytes_per_pixel;
+    //Find pixel in the image and use it as starting position to read its RGBA values
+    size_t pixel_position = ((size_t)y * img->width + (size_t)x) * color.Bytes_pp;
+    for(uint8_t B = 0; B < color.Bytes_pp; B++) color.BGR_A[B] = img->data[pixel_position + B];
+
+    return color;
+}
+void TGA_SetPixel(TGAImage* img, int x, int y, TGAColor color)
+{
+    //Check image boundaries
+    if(!img || !img->data || x < 0 || y < 0 || x >= img->width || y >= img->height) { fprintf(stderr, "[TGA_GetPixel]: Boundary error, pixel position (%d, %d) out of range!.\n", x, y); return; }
+    
+    if(color.Bytes_pp != img->Bytes_per_pixel){ fprintf(stderr, "[TGA_SetPixel]: Color format mismatch, using %u bpp but current image expects %u bpp.\n", color.Bytes_pp >> 3, img->Bytes_per_pixel >> 3); return ;}
+    //Find pixel in the image and use it as starting position to write its RGBA values
+    size_t pixel_position = ((size_t)y * img->width + (size_t)x) * (img->Bytes_per_pixel);
+    for(uint8_t B = 0; B < img->Bytes_per_pixel; B++) img->data[pixel_position + B] = color.BGR_A[B];
+
+    return;
+}
+//#############################
