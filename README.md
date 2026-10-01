@@ -11,7 +11,7 @@ A lightweight, zero-dependency C library for reading, writing, and manipulating 
 
 This project was created **for educational purposes only**, exploring computer graphics fundamentals and taking inspiration from **Professor Dmitry V. Sokolov's** [*tinyrenderer*](https://github.com/ssloy/tinyrenderer) projects.
 
-Before proceeding, please **read the `LICENSE.txt` file**, which contains the zlib/libpng license terms and full academic attributions.
+Before proceeding, please **read the `LICENSE.txt` file**, which contains the zlib/png license terms and full academic attributions.
 
 
 ## 1. What is this Library?
