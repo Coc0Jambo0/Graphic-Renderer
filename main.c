@@ -23,6 +23,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    TGA_WriteFile(img, "test_image.tga", 0, 1);
+    TGA_WriteFile(img, "test_image.tga", 1);
     return 0;
 }
