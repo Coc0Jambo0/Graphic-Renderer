@@ -1,93 +1,77 @@
-# Graphic-Renderer
+# TGA Image Library in C
+
+A lightweight, zero-dependency C library for reading, writing, and manipulating TGA image files.
+
+[![Status](https://img.shields.io/badge/Status-Work_in_Progress-yellow.svg)](#)
+[![License](https://img.shields.io/badge/License-zlib%2Fpng-blue.svg)](LICENSE.txt)
+[![Standard](https://img.shields.io/badge/Standard-C99-informational.svg)](#)
 
 
+## Preface: Legal Notice & Academic Attribution
 
-## Getting started
+This project was created **for educational purposes only**, exploring computer graphics fundamentals and taking inspiration from **Professor Dmitry V. Sokolov's** [*tinyrenderer*](https://github.com/ssloy/tinyrenderer) projects.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Before proceeding, please **read the `LICENSE.txt` file**, which contains the zlib/libpng license terms and full academic attributions.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
 
-## Add your files
+## 1. What is this Library?
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+This library provides a few set of tools to handle **Truevision TGA (.tga)** images. 
+By parsing the binary data, **header metadata and pixel payloads** can be manipulated in memory to generate, modify, and export images.
 
-```
-cd existing_repo
-git remote add origin https://gitlab.com/CocoJamboo/graphic-renderer.git
-git branch -M main
-git push -uf origin main
-```
+### Key Features
 
-## Integrate with your tools
+* **Totally independent library:** Built from scratch using only the C standard library.
 
-* [Set up project integrations](https://gitlab.com/CocoJamboo/graphic-renderer/-/settings/integrations)
+* **Color Support:** Handles **RGB** (24-bit), **RGBA** (32-bit), and **Grayscale** (8-bit) pixel formats.
 
-## Collaborate with your team
+* **Run-Length Encoding (RLE):** Supports both reading and writing RLE-compressed streams to minimize file dimensions.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+* **Cache-Friendly Memory Layout:** Data is organized in contiguous row-major order to optimize CPU prefetching and cache hit rates.
 
-## Test and Deploy
 
-Use the built-in continuous integration in GitLab.
+## 2. Main components
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+Image manipulation is structured around three data types:
 
-***
+* **`TGAHeader` (Internal):** Handles the 18-byte TGA file header.
+* **`TGAImage` (ADT):** Represents the canvas using a flat, contiguous **1D vector buffer** organized in **row-major order**.
 
-# Editing this README
+  > **Why a flat 1D buffer?**  
+  > Storing pixel data in a single allocation guarantees that rows are contiguous in RAM. On modern hardware with standard 64-Byte cache lines, requesting the first 3-byte RGB pixel incurs a single cache miss; the following ~21 pixels are loaded into L1 cache simultaneously, resulting into consecutive cache hits. A classic 2D array of pointers, scatters rows across the memory, resulting in slower fetches.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+* **`TGAColor` (non-ADT):** A struct containing a value foreach channel to **represent the desired color**.
 
-## Suggestions for a good README
+*(To learn more about the TGA format, consult the [Truevision TGA Wikipedia page](https://en.wikipedia.org/wiki/Truevision_TGA).)*
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## 3. API Reference
 
-## Name
-Choose a self-explaining name for your project.
+### Initialization & Cleanup
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
++ TGAImage* TGA_CreateImage(int width, int height, int bits_per_pixel);
+ > Allocates a new empty canvas in memory
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
++ void TGA_DestroyImage(TGAImage* img);
+ > Safely frees the image's dedicated memory
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### I/O with files
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
++ TGAImage* TGA_ReadFile(const char* filename);
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+> Fetches the TGA file from memory and parses it into binary data to be handled
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
++ int TGA_WriteFile(TGAImage* img, const char* filename, int rle_flag);
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+> Given a file location, converts the binary data into an actual image(return 0 if an error occured, otherwise return 1)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Pixel manipulation
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
++ TGAColor TGA_GetPixel(const TGAImage* img, int x, int y);
 
-## License
-For open source projects, say how it is licensed.
+> Returns the color value of the pixel at the coordinates (x, y)
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
++ void TGA_SetPixel(TGAImage* img, int x, int y, TGAColor color);
+
+> Sets the given color to the pixel at the coordinates (x, y)
