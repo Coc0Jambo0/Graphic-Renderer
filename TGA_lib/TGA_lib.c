@@ -396,7 +396,7 @@ TGAImage* TGA_ReadFile(const char* filename)
 
     return img;
 }
-int TGA_WriteFile(TGAImage* img, const char* filename, int vflip_flag, int rle_flag)
+int TGA_WriteFile(TGAImage* img, const char* filename, int rle_flag)
 {
     if(!filename){fprintf(stderr, "[TGA_ReadFile]: Invalid filename parameter (NULL pointer).\n"); return 0; }
     
