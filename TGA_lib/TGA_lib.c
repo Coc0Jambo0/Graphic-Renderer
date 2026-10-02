@@ -57,12 +57,14 @@ TGAImage* TGA_CreateImage(int width, int height, int bits_per_pixel)
     if(!img){ fprintf(stderr, "[TGA_CreateImage]: unable to service a memory request, failed to allocate TGAImage type.\n"); return NULL; }
 
     size_t num_bytes = (size_t)width * height * (bits_per_pixel >> 3);
-    img->data = malloc(num_bytes);
+    //initialize black canvas
+    img->data = calloc(1, num_bytes);
     if(!img->data){ fprintf(stderr, "[TGA_CreateImage]: out of memory, image dimensions (%dx%d @ %d bpp) exceed maximum addressable size.\n", width, height, bits_per_pixel); free(img); return NULL; }
 
     img->width = (uint16_t)width; img->height = (uint16_t)height;
-    img->Bytes_per_pixel = (uint8_t)bits_per_pixel >> 3;
+    img->Bytes_per_pixel = (uint8_t)(bits_per_pixel >> 3);
 
+    printf("%d", img->Bytes_per_pixel);
     return img;
 }
 void TGA_DestroyImage(TGAImage* img)
@@ -90,44 +92,54 @@ static int pack_RLE_data(TGAImage* img, FILE* file_out)
     while(current_pixel < total_pixel_count)
     {
         size_t pixel_seq_start = current_pixel * Bytes_per_pixel;
-        size_t current_byte_in_seq = pixel_seq_start;
-
         uint8_t seq_len = 1, is_raw = 1;
+
+        //Check if current pixel and next pixel have same color
+        //At the beginning of the sequence, recognize if its managing RLE(same color pixels) or raw pixels(different color pixels)
+        if(current_pixel + 1 < total_pixel_count)
+        {
+            uint8_t next_is_equal = (memcmp(&data[pixel_seq_start], &data[pixel_seq_start + Bytes_per_pixel], Bytes_per_pixel) == 0);
+            is_raw = !next_is_equal;
+        }
 
         while(current_pixel + seq_len < total_pixel_count && seq_len < max_pixel_read)
         {
-            //Check if current pixel and next pixel have same color
-            uint8_t next_is_equal = memcmp(&data[current_byte_in_seq], &data[current_byte_in_seq + Bytes_per_pixel], Bytes_per_pixel) == 0;
-            //At the beginning of the sequence, recognize if its managing RLE(same color pixels) or raw pixels(different color pixels)
-            if(seq_len == 1) is_raw =! next_is_equal;
-
-            //if its dealing with raw pixels and the next read pixel has same color compared to the last one in the sequence, interrupt the raw pixels sequence
-            if(is_raw && next_is_equal)
-            { 
-                //sequence length of raw pixels counts only different color pixels:
-                //thus the reason for decrementing of 1 the length
-                seq_len--; 
-                break; 
+            size_t current_byte_in_seq = pixel_seq_start + (seq_len * Bytes_per_pixel);
+            if(is_raw)
+            {
+                //if its dealing with raw pixels and the next read pixel has same color compared to the last one in the sequence, interrupt the raw pixels sequence
+                if(current_pixel + seq_len + 1 < total_pixel_count)
+                {
+                    uint8_t next_pair_is_equal = (memcmp(&data[current_byte_in_seq], &data[current_byte_in_seq + Bytes_per_pixel], Bytes_per_pixel) == 0);
+                    if(next_pair_is_equal) break;
+                } 
             }
-            //if its dealing with RLE and the next read pixel has different color compared to the last one in the sequence, interrupt the RLE sequence
-            if(!is_raw && !next_is_equal) break;
-
+            else
+            {
+                //if its dealing with RLE and the next read pixel has different color compared to the last one in the sequence, interrupt the RLE sequence
+                uint8_t matches_sequence = (memcmp(&data[pixel_seq_start], &data[current_byte_in_seq], Bytes_per_pixel) == 0);
+                if(!matches_sequence) break;
+            }
+            
             //increment size of current sequence
             seq_len++;
         }
-        //update index position after terminating current sequence
-        current_pixel += seq_len;
 
         //*if analyzed sequence contains raw pixels, save the lenght of sequence(aka 7th bit is 0)
-        //*if analyzed sequence contais RLE, save the length of the sequence + 127(aka 7th bit is 1)
-        uint8_t img_type_byte = is_raw ? (seq_len - 1) : (seq_len + 127);
+        //*if analyzed sequence contais RLE, save the length of the sequence + 127(aka 7th bit is 1) 
+                                                        //==> obtained by doing: 1000 0000 | seq_len - 1 
+        uint8_t img_type_byte = is_raw ? (seq_len - 1) : (0x80 | (seq_len - 1));
         //Write the Byte 2 in the file
         if(fputc(img_type_byte, file_out) == EOF){ fprintf(stderr, "[TGA] Write error: failed to write RLE packet header byte (%s), EOF reached\n", strerror(errno)); return 0; }
+        
         //Write pixel data:
         //*if sequence contains raw pixels, write each pixel(sequence length * Bytes per pixel)
         //*if sequence contains RLE, write only the single repeating pixel
         size_t Bytes_to_write = is_raw ? ((size_t)seq_len * Bytes_per_pixel) : (size_t)Bytes_per_pixel;
         if(fwrite(&data[pixel_seq_start], 1, Bytes_to_write, file_out) != Bytes_to_write){ fprintf(stderr, "[TGA] Write error: failed to write %zu bytes of pixel payload (%s)\n", Bytes_to_write, strerror(errno)); return 0; }
+    
+        //update index position after terminating current sequence
+        current_pixel += seq_len;
     }
 
     return 1;
@@ -187,78 +199,6 @@ static int unpack_RLE_data(TGAImage* img, FILE* file_in)
     return 1;
 }
 //################################################################
-
-//##### Flip functions for image(vertically & horizontally) #####
-static int flip_vertically(TGAImage* img)
-{
-    const size_t width = img->width;
-    const size_t height = img->height;
-    const size_t Bytes_pp = img->Bytes_per_pixel;
-
-    if(!img || !img->data || width == 0 || height == 0){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
-    if(Bytes_pp != 1 || Bytes_pp != 2 || Bytes_pp != 3 || Bytes_pp != 4){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
-    
-    //x-coordinates
-    for(size_t c = 0; c < width; c++)
-    {
-        //y-coordinates
-        for(size_t r = 0; r < height / 2; r++)
-        {
-            //Bth color channel
-            for(int B = 0; B < Bytes_pp; B++)
-            {
-                //foreach row r:
-                //traverse r * width pixels and move of c columns, convert the position in bytes and access the Bth channel
-                size_t pixel_channel = (((r * width) + c) * Bytes_pp) + B;
-                //repeat the exact same calculation but starting from the bottom(height - 1) and rising up of r rows(height - 1 - r)
-                size_t mirrored_pixel_channel = ((((height - 1 - r) * width) + c) * Bytes_pp) + B;
-                
-                //swap position
-                uint8_t temp = img->data[pixel_channel];
-                img->data[pixel_channel] = img->data[mirrored_pixel_channel];
-                img->data[mirrored_pixel_channel] = temp;
-            }
-        }
-    }
-
-    return 1;
-}
-
-static int flip_horizontally(TGAImage* img)
-{
-    const size_t width = img->width;
-    const size_t height = img->height;
-    const size_t Bytes_pp = img->Bytes_per_pixel;
-
-    if(!img || !img->data || width == 0 || height == 0){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
-    if(Bytes_pp != 1 || Bytes_pp != 2 || Bytes_pp != 3 || Bytes_pp != 4){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
-    
-    //x-coordinates
-    for(size_t c = 0; c < width / 2; c++)
-    {
-        //y-coordinates
-        for(size_t r = 0; r < height; r++)
-        {
-            //Bth color channel
-            for(int B = 0; B < Bytes_pp; B++)
-            {
-                //foreach row r:
-                //traverse r * width pixels and move of c columns, convert the position in bytes and access the Bth channel
-                size_t pixel_channel = (((r * width) + c) * Bytes_pp) + B;
-                //repeat the exact same calculation but starting from the right(width - 1) and proceeding to the left of c columns(width - 1 - c)
-                size_t mirrored_pixel_channel = (((r * width) + (width - 1 - c)) * (Bytes_pp)) + B;
-                
-                //swap position
-                uint8_t temp = img->data[pixel_channel];
-                img->data[pixel_channel] = img->data[mirrored_pixel_channel];
-                img->data[mirrored_pixel_channel] = temp;
-            }
-        }
-    }
-
-    return 1;
-}
-//###############################################################
 
 //##### Read/Write TGA image data from/in file #####
 TGAImage* TGA_ReadFile(const char* filename)
@@ -481,7 +421,7 @@ int TGA_WriteFile(TGAImage* img, const char* filename, int rle_flag)
     //RLE encoded RGB/RGBA or Grayscale image type
     else
     {
-        if(pack_RLE_data(img, file_out))
+        if(!pack_RLE_data(img, file_out))
         {
             TGA_DestroyImage(img);
             return 0;
@@ -525,3 +465,75 @@ void TGA_SetPixel(TGAImage* img, int x, int y, TGAColor color)
     return;
 }
 //#############################
+
+//##### Flip functions for image(vertically & horizontally) #####
+int flip_vertically(TGAImage* img)
+{
+    const size_t width = img->width;
+    const size_t height = img->height;
+    const size_t Bytes_pp = img->Bytes_per_pixel;
+
+    if(!img || !img->data || width == 0 || height == 0){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    if(Bytes_pp != 1 && Bytes_pp != 2 && Bytes_pp != 3 && Bytes_pp && 4){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    
+    //x-coordinates
+    for(size_t c = 0; c < width; c++)
+    {
+        //y-coordinates
+        for(size_t r = 0; r < height / 2; r++)
+        {
+            //Bth color channel
+            for(int B = 0; B < Bytes_pp; B++)
+            {
+                //foreach row r:
+                //traverse r * width pixels and move of c columns, convert the position in bytes and access the Bth channel
+                size_t pixel_channel = (((r * width) + c) * Bytes_pp) + B;
+                //repeat the exact same calculation but starting from the bottom(height - 1) and rising up of r rows(height - 1 - r)
+                size_t mirrored_pixel_channel = ((((height - 1 - r) * width) + c) * Bytes_pp) + B;
+                
+                //swap position
+                uint8_t temp = img->data[pixel_channel];
+                img->data[pixel_channel] = img->data[mirrored_pixel_channel];
+                img->data[mirrored_pixel_channel] = temp;
+            }
+        }
+    }
+
+    return 1;
+}
+
+int flip_horizontally(TGAImage* img)
+{
+    const size_t width = img->width;
+    const size_t height = img->height;
+    const size_t Bytes_pp = img->Bytes_per_pixel;
+
+    if(!img || !img->data || width == 0 || height == 0){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    if(Bytes_pp != 1 && Bytes_pp != 2 && Bytes_pp != 3 && Bytes_pp && 4){ fprintf(stderr, "[TGA] Error: Failed to flip vertically the image(invalid image data).\n"); return 0; }
+    
+    //x-coordinates
+    for(size_t c = 0; c < width / 2; c++)
+    {
+        //y-coordinates
+        for(size_t r = 0; r < height; r++)
+        {
+            //Bth color channel
+            for(int B = 0; B < Bytes_pp; B++)
+            {
+                //foreach row r:
+                //traverse r * width pixels and move of c columns, convert the position in bytes and access the Bth channel
+                size_t pixel_channel = (((r * width) + c) * Bytes_pp) + B;
+                //repeat the exact same calculation but starting from the right(width - 1) and proceeding to the left of c columns(width - 1 - c)
+                size_t mirrored_pixel_channel = (((r * width) + (width - 1 - c)) * (Bytes_pp)) + B;
+                
+                //swap position
+                uint8_t temp = img->data[pixel_channel];
+                img->data[pixel_channel] = img->data[mirrored_pixel_channel];
+                img->data[mirrored_pixel_channel] = temp;
+            }
+        }
+    }
+
+    return 1;
+}
+//###############################################################

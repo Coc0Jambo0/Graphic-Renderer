@@ -28,4 +28,9 @@ int TGA_GetHeight(const TGAImage* img);
 TGAColor TGA_GetPixel(const TGAImage* img, int x, int y);
 void TGA_SetPixel(TGAImage* img, int x, int y, TGAColor color);
 //#############################
+
+//##### Flip image(vertically & horizontally) #####
+int flip_vertically(TGAImage* img);
+int flip_horizontally(TGAImage* img);
+//#################################################
 #endif
